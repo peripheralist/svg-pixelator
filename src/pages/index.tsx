@@ -15,22 +15,24 @@ type Region = {
 };
 
 export default function Home() {
+  const [fileName, setFileName] = useState<string>();
   const [imgSource, setImgSource] = useState<string>();
   const [svgString, setSvgString] = useState<string>();
   const [srcWidth, setSrcWidth] = useState<number>();
   const [srcHeight, setSrcHeight] = useState<number>();
-  const [pixelSize, setPixelSize] = useState<number>(10);
+  const [svgWidth, setSvgWidth] = useState<number>(400);
+  const [svgHeight, setSvgHeight] = useState<number>();
+  const [normalize, setNormalize] = useState<boolean>();
+  const [forcePixelSize, setForcePixelSize] = useState<number>(4);
   const [loading, setLoading] = useState<boolean>();
 
   const imgRef = useRef<HTMLImageElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const { svgWidth, svgHeight } = useMemo(
-    () => ({
-      svgWidth: srcWidth ? srcWidth / pixelSize : 0,
-      svgHeight: srcHeight ? srcHeight / pixelSize : 0,
-    }),
-    [srcWidth, srcHeight, pixelSize]
+  const svgUrl = useMemo(
+    () =>
+      svgString ? `data:image/svg+xml;base64,${btoa(svgString)}` : undefined,
+    [svgString]
   );
 
   const drawImageAndReadPixel = useCallback(async () => {
@@ -38,7 +40,10 @@ export default function Home() {
       willReadFrequently: true,
     });
 
-    if (!ctx || !imgRef.current || !srcWidth || !srcHeight) return;
+    if (!ctx || !imgRef.current || !srcWidth || !srcHeight || !svgHeight)
+      return;
+
+    const pixelSize = srcWidth / svgWidth;
 
     function fillForPixel({ x, y }: { x: number; y: number }) {
       // Get the image data for a single pixel
@@ -74,8 +79,8 @@ export default function Home() {
     const regions: Region[] = [];
     const regionIdxs: Record<string, number> = {};
 
-    for (let y = 0; y < srcHeight; y += 1) {
-      for (let x = 0; x < srcWidth; x += 1) {
+    for (let y = 0; y < svgHeight; y += 1) {
+      for (let x = 0; x < svgWidth; x += 1) {
         const xOrigin = x;
         const fill = fillForPixel({ x, y });
         let regionWidth = 1;
@@ -119,10 +124,22 @@ export default function Home() {
       }
     }
 
-    const rects = regions.map(
-      ({ fill, size, position }) =>
-        `<rect width="${size.width}" height="${size.height}" x="${position.x}" y="${position.y}" fill="${fill}" />`
-    );
+    function roundPixelVal(n: number) {
+      if (!normalize || !(n % 4)) return n;
+
+      return forcePixelSize * Math.round(n / forcePixelSize);
+    }
+
+    const rects = regions
+      .filter((r) => r.fill !== "transparent") // omit transparent regions
+      .map(
+        ({ fill, size, position }) =>
+          `<rect width="${roundPixelVal(size.width)}" height="${roundPixelVal(
+            size.height
+          )}" x="${roundPixelVal(position.x)}" y="${roundPixelVal(
+            position.y
+          )}" fill="${fill}" />`
+      );
 
     const _svgString = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${svgWidth} ${svgHeight}">${rects.join(
       ""
@@ -131,7 +148,7 @@ export default function Home() {
     setSvgString(_svgString);
     ctx.reset();
     setLoading(false);
-  }, [srcWidth, srcHeight, svgWidth, svgHeight, pixelSize]);
+  }, [srcWidth, srcHeight, svgWidth, svgHeight, normalize, forcePixelSize]);
 
   const elemSize = 480;
 
@@ -158,7 +175,7 @@ export default function Home() {
         >
           <div style={{ display: "flex", justifyContent: "center", gap: 20 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              Original
+              {fileName ?? "Original"}
               <div
                 style={{
                   position: "relative",
@@ -184,12 +201,17 @@ export default function Home() {
                     img.onload = () => {
                       setSrcWidth(img.width);
                       setSrcHeight(img.height);
+                      setSvgHeight(
+                        Math.ceil(svgWidth * (img.height / img.width))
+                      );
                     };
                     img.src = src;
                   };
 
                   const file = e.target.files?.[0];
                   if (!file) return;
+
+                  setFileName(file.name);
 
                   reader.readAsDataURL(file);
                 }}
@@ -211,18 +233,12 @@ export default function Home() {
                   background: "white",
                 }}
               >
-                {svgString && (
-                  <_Image
-                    src={`data:image/svg+xml;base64,${btoa(svgString)}`}
-                    alt="svg"
-                    fill
-                  />
-                )}
+                {svgUrl && <_Image id="svg-img" src={svgUrl} alt="svg" fill />}
               </div>
               <form
                 style={{
                   display: "flex",
-                  alignItems: "baseline",
+                  // flexDirection: "column",
                   gap: 10,
                 }}
                 onSubmit={(e) => {
@@ -233,17 +249,55 @@ export default function Home() {
                   }, 0);
                 }}
               >
-                <label htmlFor="">Pixel size</label>
+                <div>
+                  <label htmlFor="svgWidth">SVG width</label>
+                  <br />
+                  <input
+                    style={{ width: 100 }}
+                    id="svgWidth"
+                    type="number"
+                    onChange={(e) =>
+                      setSvgWidth(parseInt(e.target.value || "0"))
+                    }
+                    value={svgWidth}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="svgHeight">SVG height</label>
+                  <br />
+                  <input
+                    style={{ width: 100 }}
+                    id="svgHeight"
+                    type="number"
+                    onChange={(e) =>
+                      setSvgHeight(parseInt(e.target.value || "0"))
+                    }
+                    value={svgHeight}
+                  />
+                </div>
+                <div>
+                  <label style={{ marginRight: 10 }} htmlFor="normalize">
+                    Force pixel size
+                  </label>
+                  <br />
+                  <input
+                    id="normalize"
+                    type="checkbox"
+                    onChange={(e) => setNormalize(e.target.checked)}
+                    checked={normalize}
+                  />
+                  <input
+                    style={{ width: 80, marginLeft: 10 }}
+                    id="forcePixelSize"
+                    type="number"
+                    onChange={(e) =>
+                      setForcePixelSize(parseInt(e.target.value || "0"))
+                    }
+                    value={forcePixelSize}
+                  />
+                </div>
 
-                <input
-                  type="number"
-                  onChange={(e) =>
-                    setPixelSize(parseInt(e.target.value || "0"))
-                  }
-                  value={pixelSize}
-                />
-
-                <button disabled={loading} type="submit">
+                <button style={{ flex: 1 }} disabled={loading} type="submit">
                   {loading ? "Generating..." : "Generate SVG"}
                 </button>
               </form>
@@ -254,6 +308,11 @@ export default function Home() {
                   : "--"}
                 kB
               </div>
+              {svgUrl && fileName && (
+                <a href={svgUrl} download={`${fileName.split(".")[0]}.svg`}>
+                  Download
+                </a>
+              )}
             </div>
           </div>
         </div>
